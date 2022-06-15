@@ -28,20 +28,6 @@ interface IMyStaking {
   event Unstake(address indexed _to, uint _value);
 
   /**
-   * @dev Record about user's staking.
-   * amount is total amount of staked tokens
-   * frozen_amount is of frozen tokens
-   * start_lock_period beginning of lock period
-   * start_reward_period beginning of reward period
-   */
-  struct Stake {
-    uint256 amount;
-    uint256 frozen_amount;
-    uint start_lock_period;
-    uint start_reward_period;
-  }
-
-  /**
    * @dev Return the period of reward in seconds.
    */
   function rewardPeriod() external view returns (uint);

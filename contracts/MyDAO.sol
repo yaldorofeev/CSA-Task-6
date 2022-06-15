@@ -4,13 +4,16 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
-/* import './MyERC20Contract.sol'; */
+import './IMyStaking.sol';
 
 contract MyDAO is AccessControl {
   using SafeERC20 for IERC20;
 
   // Accessing role to propose votings
   bytes32 public constant CHAIR_ROLE = keccak256("CHAIR_ROLE");
+
+  // Accessing role to call approveUnstake func
+  bytes32 public constant UNSTAKER_ROLE = keccak256("UNSTAKER_ROLE");
 
   // Minimum quorum
   uint256 public minimumQuorum;
@@ -28,6 +31,7 @@ contract MyDAO is AccessControl {
   uint256 public chairManCount;
 
   IERC20 voteToken;
+  IMyStaking staking;
 
   /**
    * @dev Structure oh one voting
@@ -59,27 +63,8 @@ contract MyDAO is AccessControl {
   // Unordered array of actual votings
   uint256[] public actualVotingsIds;
 
-  // Mapping from users address to his voting balance
-  mapping(address => uint256) public votersBalance;
-
   // Mapping from id to votings
   mapping(uint256 => Voting) public votings;
-
-  /* *
-   * @dev Emitted when 'voter' deposit `amount` of vote tokens to the contract
-   */
-  event Deposit(
-    address voter,
-    uint256 amount
-  );
-
-  /* *
-   * Emitted when 'voter' undeposit `amount` of vote tokens from the contract
-   */
-  event Undeposit(
-    address voter,
-    uint256 amount
-  );
 
   /* *
    * @dev Emitted when voting with 'votingId' finished with some 'result'.
@@ -116,7 +101,7 @@ contract MyDAO is AccessControl {
    * @param _debatingPeriodDuration debating period. Can't be changed in futher
    *        time
    */
-  constructor(address _chairPerson, address _voteTokenAddr,
+  constructor(address _chairPerson, address _voteTokenAddr, address _stakeAddr,
       uint256 _minimumQuorum, uint _debatingPeriodDuration) {
 
     require(_chairPerson != address(0), "Address of chair person can not be zero");
@@ -125,60 +110,36 @@ contract MyDAO is AccessControl {
 
     _setupRole(DEFAULT_ADMIN_ROLE, address(this));
     _grantRole(CHAIR_ROLE, _chairPerson);
+    _grantRole(UNSTAKER_ROLE, _stakeAddr);
     chairManCount = 1;
 
     voteToken = IERC20(_voteTokenAddr);
     voteTokenAddr = _voteTokenAddr;
+
+    staking = IMyStaking(_stakeAddr);
     minimumQuorum = _minimumQuorum;
     debatingPeriodDuration = _debatingPeriodDuration;
   }
 
   /**
-   * @dev Deposit tokens to contract
-   * @param _amount of deposited tokens
+   * @dev Function for approving unstaking of staking contract.
+   * @param _sender: address of unstaking user.
+   * @param _amount: unstaked amount.
+   * @param _balance staked balance of user
    */
-  function deposit(uint256 _amount) public {
-    votersBalance[msg.sender] += _amount;
-    voteToken.safeTransferFrom(msg.sender, address(this), _amount);
-    emit Deposit(msg.sender, _amount);
-  }
-
-  /**
-   * @dev Undeposit tokens from contract
-   * @param _amount of undeposited tokens
-   */
-  function unDeposit(uint256 _amount) public {
-    require(votersBalance[msg.sender] >= _amount, "Too many tokens requested");
-    for (uint i = 0; i < actualVotingsIds.length; i++) {
-      uint256 id = actualVotingsIds[i];
-      Voting storage vt = votings[id];
-      require(!vt.voters[msg.sender],
-        "Undeposit operation reverted due to participating in actual voting");
-      address delegator = vt.delegations[msg.sender];
-      require(!vt.voters[delegator],
-        "Undeposit operation reverted due to delegating in actual voting");
-      if (vt.delegations[msg.sender] != address(0)) {
-        vt.delegations[msg.sender] = address(0);
-        vt.delegatedTotalBalance[delegator] -= votersBalance[msg.sender];
-      }
-    }
-    votersBalance[msg.sender] -= _amount;
-    voteToken.safeTransfer(msg.sender, _amount);
-    emit Undeposit(msg.sender, _amount);
-  }
-
-  function approveUnstake(address _sender, uint256 _amount) public {
+  function approveUnstake(address _sender, uint256 _amount, uint256 _balance) public {
+    require(hasRole(UNSTAKER_ROLE, msg.sender), "Caller is not a unstaker");
     for (uint i = 0; i < actualVotingsIds.length; i++) {
       uint256 id = actualVotingsIds[i];
       Voting storage vt = votings[id];
       require(!vt.voters[_sender],
-        "Undeposit operation reverted due to participating in actual voting");
+        "Unstake operation reverted due to participating in actual voting");
       address delegator = vt.delegations[_sender];
       require(!vt.voters[delegator],
-        "Undeposit operation reverted due to delegating in actual voting");
+        "Unstake operation reverted due to delegating in actual voting");
       if (vt.delegations[_sender] != address(0)) {
         vt.delegations[_sender] = address(0);
-        vt.delegatedTotalBalance[delegator] -= votersBalance[msg.sender];
+        vt.delegatedTotalBalance[delegator] -= _balance;
       }
     }
   }
@@ -212,8 +173,10 @@ contract MyDAO is AccessControl {
    * @param _to: address to whom delegated
    */
   function delegate(uint256 _votingId, address _to) public {
-    require(votersBalance[msg.sender] != 0, "No tokens to vote");
-    require(votersBalance[_to] != 0, "This accaunt can not vote");
+    (uint256 balance,,,)= staking.stakes(msg.sender);
+    require(balance != 0, "No tokens to vote");
+    (uint256 balanceTo,,,)= staking.stakes(_to);
+    require(balanceTo != 0, "This accaunt can not vote");
     require(msg.sender != _to, "Voter cannot delegate himself");
     Voting storage vt = votings[_votingId];
     require(vt.actual, "This voting is not actual");
@@ -223,7 +186,7 @@ contract MyDAO is AccessControl {
       "This voter delegate his votes to some voter and that voter already voted");
     require(vt.delegations[msg.sender] == address(0),
       "The votes are already delegated. Undelegate them to redelegate");
-    vt.delegatedTotalBalance[_to] += votersBalance[msg.sender];
+    vt.delegatedTotalBalance[_to] += balance;
     vt.delegations[msg.sender] = _to;
   }
 
@@ -232,14 +195,15 @@ contract MyDAO is AccessControl {
    * @param _votingId of voting for votes undelegated
    */
   function unDelegate(uint256 _votingId) public {
-    require(votersBalance[msg.sender] != 0, "No tokens to vote");
+    (uint256 balance,,,)= staking.stakes(msg.sender);
+    require(balance != 0, "No tokens to vote");
     Voting storage vt = votings[_votingId];
     require(vt.actual, "This voting is not actual");
     address delegated = vt.delegations[msg.sender];
     require(delegated != address(0), "Nothing to undelegate");
     require(!vt.voters[delegated], "The voter already voted");
     vt.delegations[msg.sender] = address(0);
-    vt.delegatedTotalBalance[delegated] -= votersBalance[msg.sender];
+    vt.delegatedTotalBalance[delegated] -= balance;
   }
 
   /**
@@ -248,7 +212,8 @@ contract MyDAO is AccessControl {
    * @param _agree: agreement or disagreement for a proposal
    */
   function vote(uint256 _votingId, bool _agree) public {
-    require(votersBalance[msg.sender] != 0, "No tokens to vote");
+    (uint256 balance,,,)= staking.stakes(msg.sender);
+    require(balance != 0, "No tokens to vote");
     Voting storage vt = votings[_votingId];
     require(vt.actual, "This voting is not actual");
     require(block.timestamp < vt.startTime + debatingPeriodDuration * 1 hours,
@@ -259,10 +224,10 @@ contract MyDAO is AccessControl {
       "The voter delegate his votes and delegator already voted");
     vt.voters[msg.sender] = true;
     if (delegator != address(0)) {
-      vt.delegatedTotalBalance[delegator] -= votersBalance[msg.sender];
+      vt.delegatedTotalBalance[delegator] -= balance;
     }
     vt.delegations[msg.sender] = address(0);
-    uint256 amount = votersBalance[msg.sender];
+    uint256 amount = balance;
     amount += vt.delegatedTotalBalance[msg.sender];
     if (_agree) {
       vt.totalVotes += amount;
@@ -307,12 +272,14 @@ contract MyDAO is AccessControl {
    * In case of reentrancy by group of voters (and some chairman) the maximum
    * demadge is that the dublicated votings will remain aqtual forever.
    * @param newChairman address.
+   * return true if success.
    */
-  function addChairMan(address newChairman) public {
+  function addChairMan(address newChairman) public returns(bool) {
     require(msg.sender == address(this), "This function can be called only from voting");
     require(!hasRole(CHAIR_ROLE, newChairman));
     chairManCount += 1;
     _grantRole(CHAIR_ROLE, newChairman);
+    return true;
   }
 
   /**
@@ -320,22 +287,26 @@ contract MyDAO is AccessControl {
    * chairman in contract to call the function. The function can be called
    * only from the contract by finishing appropriate voting.
    * @param chairMan address for remove.
+   * return true if success.
    */
-  function removeChairMan(address chairMan) public {
+  function removeChairMan(address chairMan) public returns(bool) {
     require(msg.sender == address(this), "This function can be called only from voting");
     require(chairManCount > 1, "Can not leave contract without chairman");
     chairManCount -= 1;
     _revokeRole(CHAIR_ROLE, chairMan);
+    return true;
   }
 
   /**
    * @dev Function for reset minimum quorum. The function can be called
    * only from the contract by finishing appropriate voting.
    * @param newQuorum.
+   * return true if success.
    */
-  function resetMinimumQuorum(uint256 newQuorum) public {
+  function resetMinimumQuorum(uint256 newQuorum) public returns(bool) {
     require(msg.sender == address(this), "This function can be called only from voting");
     minimumQuorum = newQuorum;
+    return true;
   }
 
   /**
