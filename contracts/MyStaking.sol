@@ -58,7 +58,7 @@ contract MyStaking is IMyStaking {
   }
 
   function stake(uint256 _amount) public virtual override {
-    require(lPTokens.balanceOf(msg.sender) >= _amount, "Not enaught tokens");
+    require(lPTokens.balanceOf(msg.sender) >= _amount, "Not enough tokens");
     uint _now_ = block.timestamp;
     Stake storage st = stakes[msg.sender];
     require(_now_ >=  st.start_lock_period + lockPeriod,
