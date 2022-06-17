@@ -5,6 +5,7 @@ import "./IMyERC20Contract.sol";
 import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
+import "@unisawap/v2-periphery/interfaces/IUniswapV2Router01.sol"
 
 contract ACDMPlatform is AccessControl {
   using SafeERC20 for IMyERC20Contract;
@@ -14,8 +15,11 @@ contract ACDMPlatform is AccessControl {
 
   bytes32 private constant DAO = keccak256("DAO");
   address public immutable dao_address;
+  address public immutable xxx_token_address;
+  address public immutable uniswap_address;
 
   IMyERC20Contract ACDMToken;
+  IMyERC20Contract XXXToken;
 
   uint256 acdm_accaunt;
   uint256 acdm_spec_accaunt;
@@ -216,7 +220,17 @@ contract ACDMPlatform is AccessControl {
   }
 
   function buyAndBurnXXXTokens() public onlyDAO {
-
+    address[2] path;
+    path[0] = uniswap.WETH();
+    path[1] = xxx_token_address;
+    uniswap.swapExactETHForTokens{value: acdm_spec_accaunt}(
+            0,
+            path,
+            address(this),
+            block.timestamp + 1800
+        );
+    uint256 balance = XXXToken.balanceOf(address(this));
+    XXXToken.burn(address(this), balance);
   }
 
   function giveToOwner() public onlyDAO {
@@ -224,7 +238,17 @@ contract ACDMPlatform is AccessControl {
     acdm_spec_accaunt = 0;
   }
 
-  function changeRefersReward(uint256 refersNum, uint256 _newReward) public onlyDAO {
-    require(refersNum < refersCount, "Invalid refer");
+  function changeRefersReward(uint256 _referInSec, uint256 _newReward)
+      public onlyDAO {
+    require(_referInSec < refersCount, "Invalid refer");
+    referSaleCommissions[referInSec] = _newReward;
+  }
+
+  function getCurrentRoundId() public view returns(uint256) {
+    return _roundIds.current();
+  }
+
+  function getOrdersNumber() public view returns(uint256) {
+    return _orderId.current();
   }
 }
