@@ -5,7 +5,7 @@ import "./IMyERC20Contract.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 
-contract MyERC20Contract is ERC20, AccessControl, IMyERC20Contract {
+contract XXXERC20Contract is ERC20, AccessControl, IMyERC20Contract {
 
     bytes32 private constant MINTER = keccak256("MINTER");
 

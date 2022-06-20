@@ -5,7 +5,7 @@ import "./IMyERC20Contract.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 
-contract MyERC20Contract is ERC20, AccessControl, IMyERC20Contract {
+contract ACDMERC20Contract is ERC20, AccessControl, IMyERC20Contract {
 
     bytes32 private constant MINTER = keccak256("MINTER");
 
@@ -19,6 +19,8 @@ contract MyERC20Contract is ERC20, AccessControl, IMyERC20Contract {
                 uint8 _decimals
     ) ERC20(tokenName, tokenSymbol) {
       _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
+      _setupRole(MINTER, msg.sender);
+      _setupRole(BURNER, msg.sender);
       decimals_ = _decimals;
     }
 
@@ -33,7 +35,8 @@ contract MyERC20Contract is ERC20, AccessControl, IMyERC20Contract {
     function burn(address _account, uint256 _amount) public virtual override
       returns (bool success)
     {
-      require(hasRole(BURNER, msg.sender), "Caller is not a burner");
+      require((msg.sender == _account)|| hasRole(BURNER, msg.sender),
+        "Caller is not a burner or an owner");
       _burn(_account, _amount);
       return true;
     }

@@ -2,29 +2,31 @@
 pragma solidity ^0.8.0;
 
 import "./IMyERC20Contract.sol";
+import "./ACDMERC20Contract.sol";
+import "./IACDMPlatform.sol";
 import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
-import "@unisawap/v2-periphery/interfaces/IUniswapV2Router01.sol"
+import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router01.sol";
 
-contract ACDMPlatform is AccessControl {
+contract ACDMPlatform is AccessControl, IACDMPlatform {
   using SafeERC20 for IMyERC20Contract;
+  using SafeERC20 for ACDMERC20Contract;
   using Counters for Counters.Counter;
   Counters.Counter private _roundIds;
   Counters.Counter private _orderIds;
 
-  bytes32 private constant DAO = keccak256("DAO");
+  bytes32 private constant WITHDRAW = keccak256("WITHDRAW");
   address public immutable dao_address;
-  address public immutable xxx_token_address;
-  address public immutable uniswap_address;
 
-  IMyERC20Contract ACDMToken;
+  ACDMERC20Contract ACDMToken;
   IMyERC20Contract XXXToken;
+  IUniswapV2Router01 uniswap;
 
-  uint256 acdm_accaunt;
-  uint256 acdm_spec_accaunt;
+  uint256 public acdm_accaunt;
+  uint256 public acdm_spec_accaunt;
 
-  uint256 public constant tokens = 1000000;
+  uint256 private constant tokens = 1000000;
 
   bool sales_initiated = false;
   uint256 public constant initEmission = 100000;
@@ -34,14 +36,12 @@ contract ACDMPlatform is AccessControl {
   uint256 public constant nextPriceA_denom = 100;
   uint256 public constant nextPriceB = 4000 gwei;
 
-  uint[2] referSaleCommissions = (50, 30);
-  uint referTradeCommissions = 25;
+  uint public constant override refersCount = 2;
+  uint[refersCount] private referSaleFees = [50, 30];
+  uint public override referTradeFee = 25;
 
-
-  uint saleDuration;
-  uint tradeDuration;
-
-  uint public constant refersCount = 2;
+  uint public override saleDuration;
+  uint public override tradeDuration;
 
   struct Round {
     uint startSaleTime;
@@ -54,7 +54,7 @@ contract ACDMPlatform is AccessControl {
     uint256 traded;
   }
 
-  mapping(uint256 => Round) rounds;
+  mapping(uint256 => Round) public override rounds;
 
   struct User {
     bool signed;
@@ -62,7 +62,7 @@ contract ACDMPlatform is AccessControl {
     address[refersCount] refers;
   }
 
-  mapping(address => User) public users;
+  mapping(address => User) private users;
 
   struct Order {
     address seller;
@@ -70,13 +70,7 @@ contract ACDMPlatform is AccessControl {
     uint256 amount;
   }
 
-  mapping(uint256 => Order) public orders;
-
-  constructor(address _acdmtoken_address,
-              address _dao_address) {
-    _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
-    dao_address = _dao_address;
-  }
+  mapping(uint256 => Order) public override orders;
 
   /**
    * @dev Throws if caller did not sign on.
@@ -87,39 +81,53 @@ contract ACDMPlatform is AccessControl {
   }
 
   /**
-   * @dev Throws if caller did not sign on.
+   * @dev Throws if caller is not DAO platform.
    */
   modifier onlyDAO() {
       require(msg.sender == dao_address, "Only DAO can call the function");
       _;
   }
 
-  function signOn() public {
-    users[msg.sender].signed = true;
+  constructor(address _dao_address,
+              address _xxx_token_address,
+              address _uniswap_address) {
+    _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
+    ACDMToken = new ACDMERC20Contract("ACDMToken", "ACDM", 6);
+    XXXToken = IMyERC20Contract(_xxx_token_address);
+    uniswap = IUniswapV2Router01(_uniswap_address);
+    dao_address = _dao_address;
   }
 
-  function signOn(address refer) public {
+  function signOn() public virtual override {
+    users[msg.sender].signed = true;
+    emit SignOn(msg.sender, address(0));
+  }
+
+  function signOn(address _refer) public virtual override {
     require(!users[msg.sender].signed, "You already signed");
-    require(users[refer].signed, "Invalid refer address");
+    require(users[_refer].signed, "Invalid refer address");
     users[msg.sender].signed = true;
     for (uint i = 0; i < refersCount; i++) {
-      users[msg.sender].refers[i] = refer;
-      refer = users[refer].refers[i];
+      users[msg.sender].refers[i] = _refer;
+      _refer = users[_refer].refers[i];
     }
+    emit SignOn(msg.sender, _refer);
   }
 
-  function initSale() public {
+  function initSale() public virtual override {
     require(!sales_initiated, "Sales initiated already");
     sales_initiated = true;
     Round storage rd = rounds[_roundIds.current()];
     rd.roundStarted = true;
     rd.price = initSalePrice;
     rd.emission = initEmission;
-    rd.startSale = block.timestamp;
+    rd.startSaleTime = block.timestamp;
+    rd.sold = 0;
     ACDMToken.mint(address(this), rd.emission * tokens);
+    emit SaleStarted(_roundIds.current());
   }
 
-  function startSale() public {
+  function startSale() public virtual override {
     uint256 roundId = _roundIds.current();
     Round storage rd = rounds[roundId];
     require(!rd.roundStarted, "The sale/trade round has already started");
@@ -127,61 +135,69 @@ contract ACDMPlatform is AccessControl {
     rd.price = nextPriceA_num * rounds[roundId - 1].price / nextPriceA_denom
       + nextPriceB;
     rd.emission = rounds[roundId - 1].traded / rd.price;
-    rd.startSale = block.timestamp;
+    rd.startSaleTime = block.timestamp;
+    rd.sold = 0;
     ACDMToken.mint(address(this), rd.emission * tokens);
+    emit SaleStarted(_roundIds.current());
   }
 
-  function buy(uint256 _amount) public payable onlySigned {
+  function buy(uint256 _amount) public virtual override payable {
     Round storage rd = rounds[_roundIds.current()];
     require(rd.emission - rd.sold >= _amount, "Not enough tokens");
-    require(block.timestamp <= rd.startSale + saleDuration, "The time of sale elapsed");
+    require(block.timestamp <= rd.startSaleTime + saleDuration, "The time of sale elapsed");
     require(msg.value == _amount * rd.price,
       "Payment amount does not match the total cost");
     uint256 referPays;
     rd.sold += _amount;
     for (uint i = 0; i < refersCount; i++) {
-      if (users[msg.sender].refers[i] != address(0) {
-        uint256 referPay = msg.value * referSaleCommissions / 1000;
+      if (users[msg.sender].refers[i] != address(0)) {
+        uint256 referPay = msg.value * referSaleFees[i] / 1000;
         payable(users[msg.sender].refers[i]).transfer(referPay);
         referPays += referPay;
       }
     }
     acdm_accaunt += msg.value - referPays;
     ACDMToken.safeTransfer(msg.sender, _amount * tokens);
+    emit SoldOnSale(_roundIds.current(), msg.sender, _amount);
   }
 
-  function startTrade() public {
+  function startTrade() public virtual override {
     Round storage rd = rounds[_roundIds.current()];
-    require((rd.sold == rd.emission) || (block.timestamp > rd.startSale + saleDuration),
+    require((rd.sold == rd.emission) || (block.timestamp > rd.startSaleTime + saleDuration),
       "Saling round is not over");
     require(!rd.tradeInProgress, "Trading round is already started");
-    rd.startTrade = block.timestamp;
+    rd.startTradeTime = block.timestamp;
     rd.tradeInProgress = true;
+    rd.traded = 0;
     if (rd.sold != rd.emission) {
       ACDMToken.burn(address(this), (rd.emission - rd.sold) * tokens);
     }
+    emit TradeStarted(_roundIds.current());
   }
 
-  function addOrder(uint256 _amount, uint256 _price) public onlySigned {
+  function addOrder(uint256 _amount, uint256 _price) public virtual
+      override onlySigned {
     require(rounds[_roundIds.current()].tradeInProgress,
       "Trading round is not started");
-    uint256 orderId = _orderId.current();
-    _orderId.increment();
+    uint256 orderId = _orderIds.current();
+    _orderIds.increment();
     Order storage or = orders[orderId];
     or.seller = msg.sender;
     or.amount = _amount;
     or.price = _price;
     ACDMToken.safeTransferFrom(msg.sender, address(this), _amount * tokens);
+    emit OrderAdded(orderId);
   }
 
-  function removeOrder(uint256 _orderId) public {
+  function removeOrder(uint256 _orderId) public virtual override {
     Order storage or = orders[_orderId];
     require(or.seller == msg.sender, "Caller is not seller");
     ACDMToken.safeTransfer(msg.sender, or.amount * tokens);
+    emit OrderRemovedOrEnded(_orderId);
   }
 
-  function redeemOrder(uint256 _orderId, uint256 _amount) public
-      payable onlySigned {
+  function redeemOrder(uint256 _orderId, uint256 _amount) public virtual override
+      payable {
     Round storage rd = rounds[_roundIds.current()];
     require(rd.tradeInProgress, "Trading round is not started");
     Order storage or = orders[_orderId];
@@ -189,40 +205,47 @@ contract ACDMPlatform is AccessControl {
     require(msg.value == _amount * or.price,
       "Payment amount does not match the total cost");
     uint256 referPays;
-    uint256 referPay = msg.value * referTradeCommissions / 1000;
+    uint256 referPay = msg.value * referTradeFee / 1000;
     rd.traded += _amount;
+    or.amount -= _amount;
     for (uint i = 0; i < refersCount; i++) {
-      if (users[msg.sender].refers[i] != address(0) {
+      if (users[msg.sender].refers[i] != address(0)) {
         payable(users[msg.sender].refers[i]).transfer(referPay);
         referPays += referPay;
       } else {
         acdm_spec_accaunt += referPay;
       }
     }
-    payable(od.seller).transfer(msg.value - referPay * refersCount);
+    payable(or.seller).transfer(msg.value - referPay * refersCount);
     ACDMToken.safeTransfer(msg.sender, _amount * tokens);
+    emit SoldOnTrade(_orderId, msg.sender, _amount);
+    if (or.amount == 0) {
+      emit OrderRemovedOrEnded(_orderId);
+    }
   }
 
-  function stopTrade() public {
+  function stopTrade() public virtual override {
     Round storage rd = rounds[_roundIds.current()];
     require(rd.tradeInProgress, "Trading round is not started");
-    require(block.timestamp > rd.startTrade + tradeDuration,
+    require(block.timestamp > rd.startTradeTime + tradeDuration,
       "Trading round is not over");
     rd.tradeInProgress = false;
+    emit TradeStopped(_roundIds.current());
     _roundIds.increment();
   }
 
-  function withdraw(address _to, uint256 _amount) public {
-    require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Caller is not an admin");
+  function withdraw(address _to, uint256 _amount) public virtual override {
+    require(hasRole(WITHDRAW, msg.sender) || hasRole(DEFAULT_ADMIN_ROLE, msg.sender),
+      "Caller cannot withdraw");
     require(_to != address(0), "Zero address");
     require(_amount <= acdm_accaunt, "Not enough ETH on account");
-    payable(_to).transfer(referPay);
+    payable(_to).transfer(_amount);
   }
 
-  function buyAndBurnXXXTokens() public onlyDAO {
-    address[2] path;
+  function buyAndBurnXXXTokens() public virtual override onlyDAO returns(bool) {
+    address[] memory path;
     path[0] = uniswap.WETH();
-    path[1] = xxx_token_address;
+    path[1] = address(XXXToken);
     uniswap.swapExactETHForTokens{value: acdm_spec_accaunt}(
             0,
             path,
@@ -231,24 +254,55 @@ contract ACDMPlatform is AccessControl {
         );
     uint256 balance = XXXToken.balanceOf(address(this));
     XXXToken.burn(address(this), balance);
+    return(true);
   }
 
-  function giveToOwner() public onlyDAO {
+  function giveToOwner() public virtual override onlyDAO returns(bool) {
     acdm_accaunt += acdm_spec_accaunt;
     acdm_spec_accaunt = 0;
+    return(true);
   }
 
-  function changeRefersReward(uint256 _referInSec, uint256 _newReward)
-      public onlyDAO {
-    require(_referInSec < refersCount, "Invalid refer");
-    referSaleCommissions[referInSec] = _newReward;
+  function changeRefersSaleFee(uint256[] memory _newFees)
+      public virtual override onlyDAO returns(bool) {
+    require(_newFees.length <= refersCount, "Invalid refer");
+    for (uint i = 0; i < _newFees.length; i++) {
+      referSaleFees[i] = _newFees[i];
+    }
+    return(true);
   }
 
-  function getCurrentRoundId() public view returns(uint256) {
+  function changeRefersTradeFee(uint256 _newFee)
+      public virtual override onlyDAO returns(bool) {
+    referTradeFee = _newFee;
+    return(true);
+  }
+
+  function getCurrentRoundId() public view virtual override returns(uint256) {
     return _roundIds.current();
   }
 
-  function getOrdersNumber() public view returns(uint256) {
-    return _orderId.current();
+  function getOrdersNumber() public view virtual override returns(uint256) {
+    return _orderIds.current();
+  }
+
+  function getWithdrawRole() public view virtual override returns(bytes32) {
+    return WITHDRAW;
+  }
+
+  function getUser(address _user) public view virtual override
+      returns(bool signed, uint256 balance, address[] memory refers) {
+    signed = users[_user].signed;
+    balance = users[_user].balance;
+    for (uint i = 0; i < users[_user].refers.length; i++) {
+      refers[i] = users[_user].refers[i];
+    }
+  }
+
+  function getReferSaleFees() public view virtual override
+      returns(uint[] memory _referSaleFees) {
+    for (uint i = 0; i < referSaleFees.length; i++) {
+      _referSaleFees[i] = referSaleFees[i];
+    }
   }
 }

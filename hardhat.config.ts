@@ -3,6 +3,7 @@ import { task } from "hardhat/config";
 import "@nomiclabs/hardhat-etherscan";
 import "@nomiclabs/hardhat-waffle";
 import "hardhat-gas-reporter";
+import '@typechain/hardhat'
 // import "hardhat-change-network";
 import "solidity-coverage";
 // import "./tasks/swap.ts";
@@ -62,6 +63,11 @@ export default {
       accounts: {mnemonic: process.env.MNEMONIC}
     },
     hardhat: {
+      accounts: {mnemonic: process.env.MNEMONIC},
+      forking: {
+              url: process.env.RINKEBY_URL || '',
+              blockNumber: 10884241
+          },
     },
   },
   paths: {

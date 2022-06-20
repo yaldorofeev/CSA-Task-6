@@ -5,8 +5,9 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import './IMyStaking.sol';
+import './IMyDAO.sol';
 
-contract MyDAO is AccessControl {
+contract MyDAO is AccessControl, IMyDAO {
   using SafeERC20 for IERC20;
 
   // Accessing role to propose votings
@@ -16,19 +17,19 @@ contract MyDAO is AccessControl {
   bytes32 public constant UNSTAKER_ROLE = keccak256("UNSTAKER_ROLE");
 
   // Minimum quorum
-  uint256 public minimumQuorum;
+  uint256 public override minimumQuorum;
 
   // Period of votings in hours that assigned in constructor once
-  uint256 public immutable debatingPeriodDuration;
+  uint256 public immutable override debatingPeriodDuration;
 
   // Address of voting tokens contract
-  address public voteTokenAddr;
+  address public override voteTokenAddr;
 
   // Votind Id counter "can increment only"
-  uint256 public votingCount;
+  uint256 public override votingCount;
 
   // Charman counter
-  uint256 public chairManCount;
+  uint256 public override chairManCount;
 
   IERC20 voteToken;
   IMyStaking staking;
@@ -61,37 +62,11 @@ contract MyDAO is AccessControl {
   }
 
   // Unordered array of actual votings
-  uint256[] public actualVotingsIds;
+  uint256[] private actualVotingsIds;
 
   // Mapping from id to votings
-  mapping(uint256 => Voting) public votings;
+  mapping(uint256 => Voting) public override votings;
 
-  /* *
-   * @dev Emitted when voting with 'votingId' finished with some 'result'.
-   */
-  event NewVotingAdded(
-    uint256 votingId,
-    string description
-  );
-
-  /* *
-   * @dev Emitted when anybody voted in voting 'votingId' for 'result' with
-   * 'amount' of votes.
-   */
-  event Vote(
-    uint256 votingId,
-    address voter,
-    bool result,
-    uint256 amount
-  );
-
-  /* *
-   * @dev Emitted when voting with 'votingId' finished with some 'result'.
-   */
-  event VotingOver(
-    uint256 votingId,
-    bool result
-  );
 
   /**
    * @dev constructor
@@ -121,13 +96,9 @@ contract MyDAO is AccessControl {
     debatingPeriodDuration = _debatingPeriodDuration;
   }
 
-  /**
-   * @dev Function for approving unstaking of staking contract.
-   * @param _sender: address of unstaking user.
-   * @param _amount: unstaked amount.
-   * @param _balance staked balance of user
-   */
-  function approveUnstake(address _sender, uint256 _amount, uint256 _balance) public {
+  // See IMyDAO-approveUnstake
+  function approveUnstake(address _sender, uint256 _amount, uint256 _balance)
+      public virtual override{
     require(hasRole(UNSTAKER_ROLE, msg.sender), "Caller is not a unstaker");
     for (uint i = 0; i < actualVotingsIds.length; i++) {
       uint256 id = actualVotingsIds[i];
@@ -144,14 +115,9 @@ contract MyDAO is AccessControl {
     }
   }
 
-  /**
-   * @dev Only chairmans can propose votings
-   * @param _callData: data for call an external contract
-   * @param _recipient: address of an external contract
-   * @param _description of call
-   */
+  // See IMyDAO-addProposal
   function addProposal(bytes memory _callData, address _recipient,
-      string memory _description) public {
+      string memory _description) public virtual override {
     require(hasRole(CHAIR_ROLE, msg.sender), "Caller is not a chairman");
     uint256 votingId = votingCount;
     votingCount += 1;
@@ -167,12 +133,8 @@ contract MyDAO is AccessControl {
     emit NewVotingAdded(votingId, _description);
   }
 
-  /**
-   * @dev Delegate votes to some person. That person should have voting tokens.
-   * @param _votingId of voting for votes delegated
-   * @param _to: address to whom delegated
-   */
-  function delegate(uint256 _votingId, address _to) public {
+  // See IMyDAO-delegate
+  function delegate(uint256 _votingId, address _to) public virtual override {
     (uint256 balance,,,)= staking.stakes(msg.sender);
     require(balance != 0, "No tokens to vote");
     (uint256 balanceTo,,,)= staking.stakes(_to);
@@ -190,11 +152,8 @@ contract MyDAO is AccessControl {
     vt.delegations[msg.sender] = _to;
   }
 
-  /**
-   * @dev Undelegate votes.
-   * @param _votingId of voting for votes undelegated
-   */
-  function unDelegate(uint256 _votingId) public {
+  // See IMyDAO-unDelegate
+  function unDelegate(uint256 _votingId) public virtual override {
     (uint256 balance,,,)= staking.stakes(msg.sender);
     require(balance != 0, "No tokens to vote");
     Voting storage vt = votings[_votingId];
@@ -206,12 +165,8 @@ contract MyDAO is AccessControl {
     vt.delegatedTotalBalance[delegated] -= balance;
   }
 
-  /**
-   * @dev Vote for proposal.
-   * @param _votingId of voting.
-   * @param _agree: agreement or disagreement for a proposal
-   */
-  function vote(uint256 _votingId, bool _agree) public {
+  // See IMyDAO-vote
+  function vote(uint256 _votingId, bool _agree) public virtual override {
     (uint256 balance,,,)= staking.stakes(msg.sender);
     require(balance != 0, "No tokens to vote");
     Voting storage vt = votings[_votingId];
@@ -238,11 +193,8 @@ contract MyDAO is AccessControl {
     emit Vote(_votingId, msg.sender, _agree, amount);
   }
 
-  /**
-   * @dev Finish voting for proposal. Anybody can call this function.
-   * @param _votingId of voting.
-   */
-  function finishProposal(uint256 _votingId) public {
+  // See IMyDAO-finishProposal
+  function finishProposal(uint256 _votingId) public virtual override{
     Voting storage vt = votings[_votingId];
     require(vt.actual, "This voting is not actual");
     require(block.timestamp > vt.startTime + debatingPeriodDuration * 1 hours,
@@ -309,10 +261,32 @@ contract MyDAO is AccessControl {
     return true;
   }
 
-  /**
-   * @dev Getter for actual votings array length
-   */
-  function getActualVotingsIdsLength() public view returns(uint256) {
+  // See IMyDAO-getActualVotingsIdsLength
+  function getActualVotingsIdsLength() public view virtual override returns(uint256) {
     return actualVotingsIds.length;
+  }
+
+  // See IMyDAO-getIsVoted
+  function getIsVoted(uint256 _votingId, address _voter) public view
+      virtual override returns(bool) {
+    return votings[_votingId].voters[_voter];
+  }
+
+  // See IMyDAO-getDelegated
+  function getDelegated(uint256 _votingId, address _delegetor) public
+      view virtual override returns(address) {
+    return votings[_votingId].delegations[_delegetor];
+  }
+
+  // See IMyDAO-getDelegatedTotalBalance
+  function getDelegatedTotalBalance(uint256 _votingId, address _delegeted)
+      public view virtual override returns(uint256) {
+    return votings[_votingId].delegatedTotalBalance[_delegeted];
+  }
+
+  // See IMyDAO-getActualVotingsIds
+  function getActualVotingsIds() public view virtual override
+      returns(uint256[] memory) {
+    return actualVotingsIds;
   }
 }
