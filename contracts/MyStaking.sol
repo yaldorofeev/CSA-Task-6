@@ -13,6 +13,8 @@ contract MyStaking is IMyStaking {
   IERC20 lPTokens;
   MyDAO daoContract;
 
+  address public owner;
+  bool initiated = false;
 
   uint public override rewardPeriod;
   uint public override lockPeriod;
@@ -36,29 +38,32 @@ contract MyStaking is IMyStaking {
 
   constructor(address _uniswap_contract_address,
               address _erc20_reward_contract_address,
-              address _dao_contract_address,
               uint _reward_period,
               uint _lock_period,
-              uint256 _reward_procents
+              uint256 _reward_procents,
+              address _daoChairPerson,
+              uint256 _daoMinimumQuorum,
+              uint _daoDebatingPeriodDuration
               ) {
     require(_uniswap_contract_address != address(0),
       "Contract address can not be zero");
     require(_erc20_reward_contract_address != address(0),
       "Contract address can not be zero");
-    require(_dao_contract_address != address(0),
-      "Contract address can not be zero");
     require(_reward_period != 0, "Reward period can not be zero");
     rewardTokens = IERC20(_erc20_reward_contract_address);
     lPTokens = IERC20(_uniswap_contract_address);
-    daoContract = MyDAO(_dao_contract_address);
-    rewardPeriod = _reward_period;
-    lockPeriod = _lock_period;
+    daoContract = new MyDAO(
+      _daoChairPerson,
+      this,
+      _daoMinimumQuorum,
+      _daoDebatingPeriodDuration);
+    rewardPeriod = _reward_period * 1 minutes;
+    lockPeriod = _lock_period * 1 minutes;
     rewardProcents = _reward_procents;
 
   }
 
   function stake(uint256 _amount) public virtual override {
-    require(lPTokens.balanceOf(msg.sender) >= _amount, "Not enough tokens");
     uint _now_ = block.timestamp;
     Stake storage st = stakes[msg.sender];
     require(_now_ >=  st.start_lock_period + lockPeriod,

@@ -71,27 +71,23 @@ contract MyDAO is AccessControl, IMyDAO {
   /**
    * @dev constructor
    * @param _chairPerson first chairMan of the contract
-   * @param _voteTokenAddr addresses of voting tokens contract
+   * @param _staking staking contract
    * @param _minimumQuorum initial quorum
    * @param _debatingPeriodDuration debating period. Can't be changed in futher
    *        time
    */
-  constructor(address _chairPerson, address _voteTokenAddr, address _stakeAddr,
+  constructor(address _chairPerson, IMyStaking _staking,
       uint256 _minimumQuorum, uint _debatingPeriodDuration) {
 
     require(_chairPerson != address(0), "Address of chair person can not be zero");
-    require(_voteTokenAddr != address(0), "Address of token can not be zero");
     require(_debatingPeriodDuration != 0, "Debating period can not be zero");
 
     _setupRole(DEFAULT_ADMIN_ROLE, address(this));
     _grantRole(CHAIR_ROLE, _chairPerson);
-    _grantRole(UNSTAKER_ROLE, _stakeAddr);
+    _grantRole(UNSTAKER_ROLE, address(_staking));
     chairManCount = 1;
 
-    voteToken = IERC20(_voteTokenAddr);
-    voteTokenAddr = _voteTokenAddr;
-
-    staking = IMyStaking(_stakeAddr);
+    staking = _staking;
     minimumQuorum = _minimumQuorum;
     debatingPeriodDuration = _debatingPeriodDuration;
   }
