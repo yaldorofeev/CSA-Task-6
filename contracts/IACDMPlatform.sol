@@ -65,7 +65,7 @@ interface IACDMPlatform {
    * @dev Emitted when anyone removes their order 'orderId' or amount
    * of token in this order becomes zero.
    */
-  event OrderRemovedOrEnded (
+  event OrderClosed (
     uint256 orderId
   );
 
@@ -109,7 +109,7 @@ interface IACDMPlatform {
 
   function refersCount() external view returns(uint);
 
-  function getReferSaleFees() external view returns(uint[] memory);
+  function referSaleFees(uint256) external view returns(uint256);
 
   function referTradeFee() external view returns(uint);
 
@@ -117,23 +117,26 @@ interface IACDMPlatform {
 
   function tradeDuration() external view returns(uint);
 
-  function rounds(uint256 roundId) external view
-    returns(uint startSaleTime,
-            uint startTradeTime,
-            bool roundStarted,
-            bool tradeInProgress,
-            uint256 price,
-            uint256 emission,
-            uint256 sold,
-            uint256 traded);
+  function rounds(uint256 roundId) external view returns(
+    uint startSaleTime,
+    uint startTradeTime,
+    bool roundStarted,
+    bool tradeInProgress,
+    uint256 price,
+    uint256 emission,
+    uint256 sold,
+    uint256 traded);
 
-  function getUser(address user) external view
-    returns(bool signed,
-            uint256 balance,
-            address[] memory refers);
+  function users(address user) external view returns(bool signed);
 
-  function orders(uint256 orderId) external view
-    returns(address seller,
-            uint256 price,
-            uint256 amount);
+  function getUserRefers(address user, uint256 referNumber) external
+    view returns(address);
+
+  function orders(uint256 orderId) external view returns(
+    address seller,
+    uint256 price,
+    uint256 amount);
+
+  function acdmTokenAddress() external view returns(address);
+
 }

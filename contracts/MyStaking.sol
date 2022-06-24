@@ -20,6 +20,8 @@ contract MyStaking is IMyStaking {
   uint public override lockPeriod;
   uint256 public override rewardProcents;
 
+  address public override daoContractAddress;
+
   /**
    * @dev Record about user's staking.
    * amount is total amount of staked tokens
@@ -46,9 +48,9 @@ contract MyStaking is IMyStaking {
               uint _daoDebatingPeriodDuration
               ) {
     require(_uniswap_contract_address != address(0),
-      "Contract address can not be zero");
+      "Uniswap contract address can not be zero");
     require(_erc20_reward_contract_address != address(0),
-      "Contract address can not be zero");
+      "Reward tokens contract address can not be zero");
     require(_reward_period != 0, "Reward period can not be zero");
     rewardTokens = IERC20(_erc20_reward_contract_address);
     lPTokens = IERC20(_uniswap_contract_address);
@@ -57,10 +59,10 @@ contract MyStaking is IMyStaking {
       this,
       _daoMinimumQuorum,
       _daoDebatingPeriodDuration);
-    rewardPeriod = _reward_period * 1 minutes;
-    lockPeriod = _lock_period * 1 minutes;
+    daoContractAddress = address(daoContract);
+    rewardPeriod = _reward_period * 1 days;
+    lockPeriod = _lock_period * 1 days;
     rewardProcents = _reward_procents;
-
   }
 
   function stake(uint256 _amount) public virtual override {
@@ -76,9 +78,7 @@ contract MyStaking is IMyStaking {
     st.frozen_amount = _amount;
     st.amount += _amount;
     st.start_lock_period = _now_;
-
     lPTokens.safeTransferFrom(msg.sender, address(this), _amount);
-
     emit StakeDone(msg.sender, _amount);
   }
 
@@ -112,7 +112,6 @@ contract MyStaking is IMyStaking {
     uint _now_ = block.timestamp;
     Stake storage st = stakes[msg.sender];
     daoContract.approveUnstake(msg.sender, _amount, st.amount);
-    require(_now_ >= st.start_lock_period + lockPeriod, "Its not time to unstake yet");
     if (_now_ <= st.start_lock_period + lockPeriod) {
       require(st.amount - st.frozen_amount  >= _amount,
         "Amount of tokens exceeds available amount");
@@ -129,13 +128,13 @@ contract MyStaking is IMyStaking {
   /**
    * @dev The function reset lock period of staking. Only DAO contract can
    *      call it.
-   * @param newPeriod.
+   * @param newPeriodDays.
    *
    * The function not declared in the intarface because it will be called
    * by its signature.
    */
-  function reset_lock_period(uint newPeriod) public {
-    require(msg.sender == address(daoContract));
-    lockPeriod = newPeriod;
+  function reset_lock_period(uint newPeriodDays) public {
+    require(msg.sender == address(daoContract), "Only DAO can call the function");
+    lockPeriod = newPeriodDays * 1 days;
   }
 }

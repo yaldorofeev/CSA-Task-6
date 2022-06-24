@@ -43,6 +43,11 @@ interface IMyStaking {
   function rewardProcents() external view returns (uint256);
 
   /**
+   * @dev Return address of DAO contract that deployed by this contract.
+   */
+  function daoContractAddress() external view returns (address);
+
+  /**
    * @dev Mapping from staker to record about user's staking.
    */
   function stakes(address staker) external view returns (uint256, uint256, uint, uint);

@@ -8,6 +8,7 @@ import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router01.sol";
+import "hardhat/console.sol";
 
 contract ACDMPlatform is AccessControl, IACDMPlatform {
   using SafeERC20 for IMyERC20Contract;
@@ -18,6 +19,7 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
 
   bytes32 private constant WITHDRAW = keccak256("WITHDRAW");
   address public immutable dao_address;
+  address public immutable override acdmTokenAddress;
 
   ACDMERC20Contract ACDMToken;
   IMyERC20Contract XXXToken;
@@ -37,11 +39,11 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
   uint256 public constant nextPriceB = 4000 gwei;
 
   uint public constant override refersCount = 2;
-  uint[refersCount] private referSaleFees = [50, 30];
+  mapping(uint256 => uint256) public override referSaleFees;
   uint public override referTradeFee = 25;
 
-  uint public override saleDuration;
-  uint public override tradeDuration;
+  uint public override saleDuration = 3 days;
+  uint public override tradeDuration = 3 days;
 
   struct Round {
     uint startSaleTime;
@@ -58,11 +60,10 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
 
   struct User {
     bool signed;
-    uint256 balance;
-    address[refersCount] refers;
+    mapping(uint256 => address) refers;
   }
 
-  mapping(address => User) private users;
+  mapping(address => User) public override users;
 
   struct Order {
     address seller;
@@ -92,13 +93,23 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
               address _xxx_token_address,
               address _uniswap_address) {
     _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
+    require(_dao_address != address(0),
+      "DAO contract address can not be zero");
+    require(_xxx_token_address != address(0),
+      "XXX tokens contract address can not be zero");
+    require(_uniswap_address != address(0),
+      "Uniswap contract address can not be zero");
     ACDMToken = new ACDMERC20Contract("ACDMToken", "ACDM", 6);
+    acdmTokenAddress = address(ACDMToken);
     XXXToken = IMyERC20Contract(_xxx_token_address);
     uniswap = IUniswapV2Router01(_uniswap_address);
     dao_address = _dao_address;
+    referSaleFees[0] = 50;
+    referSaleFees[1] = 30;
   }
 
   function signOn() public virtual override {
+    require(!users[msg.sender].signed, "You already signed");
     users[msg.sender].signed = true;
     emit SignOn(msg.sender, address(0));
   }
@@ -107,11 +118,12 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
     require(!users[msg.sender].signed, "You already signed");
     require(users[_refer].signed, "Invalid refer address");
     users[msg.sender].signed = true;
+    address first_refer = _refer;
     for (uint i = 0; i < refersCount; i++) {
       users[msg.sender].refers[i] = _refer;
       _refer = users[_refer].refers[i];
     }
-    emit SignOn(msg.sender, _refer);
+    emit SignOn(msg.sender, first_refer);
   }
 
   function initSale() public virtual override {
@@ -192,21 +204,25 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
   function removeOrder(uint256 _orderId) public virtual override {
     Order storage or = orders[_orderId];
     require(or.seller == msg.sender, "Caller is not seller");
-    ACDMToken.safeTransfer(msg.sender, or.amount * tokens);
-    emit OrderRemovedOrEnded(_orderId);
+    uint256 amount = or.amount;
+    or.amount = 0;
+    ACDMToken.safeTransfer(msg.sender, amount * tokens);
+    emit OrderClosed(_orderId);
   }
 
   function redeemOrder(uint256 _orderId, uint256 _amount) public virtual override
       payable {
     Round storage rd = rounds[_roundIds.current()];
     require(rd.tradeInProgress, "Trading round is not started");
+    require(block.timestamp <= rd.startTradeTime + tradeDuration,
+      "Trading round is over");
     Order storage or = orders[_orderId];
     require(or.amount >= _amount, "Not enough tokens on the order");
     require(msg.value == _amount * or.price,
       "Payment amount does not match the total cost");
     uint256 referPays;
     uint256 referPay = msg.value * referTradeFee / 1000;
-    rd.traded += _amount;
+    rd.traded += msg.value;
     or.amount -= _amount;
     for (uint i = 0; i < refersCount; i++) {
       if (users[msg.sender].refers[i] != address(0)) {
@@ -220,7 +236,7 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
     ACDMToken.safeTransfer(msg.sender, _amount * tokens);
     emit SoldOnTrade(_orderId, msg.sender, _amount);
     if (or.amount == 0) {
-      emit OrderRemovedOrEnded(_orderId);
+      emit OrderClosed(_orderId);
     }
   }
 
@@ -243,15 +259,17 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
   }
 
   function buyAndBurnXXXTokens() public virtual override onlyDAO returns(bool) {
-    address[] memory path;
+    address[] memory path = new address[](2);
     path[0] = uniswap.WETH();
     path[1] = address(XXXToken);
-    uniswap.swapExactETHForTokens{value: acdm_spec_accaunt}(
-            0,
-            path,
-            address(this),
-            block.timestamp + 1800
-        );
+    uint256 pay = acdm_spec_accaunt;
+    acdm_spec_accaunt = 0;
+    uniswap.swapExactETHForTokens{value: pay}(
+      0,
+      path,
+      address(this),
+      block.timestamp + 1800
+    );
     uint256 balance = XXXToken.balanceOf(address(this));
     XXXToken.burn(address(this), balance);
     return(true);
@@ -290,19 +308,8 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
     return WITHDRAW;
   }
 
-  function getUser(address _user) public view virtual override
-      returns(bool signed, uint256 balance, address[] memory refers) {
-    signed = users[_user].signed;
-    balance = users[_user].balance;
-    for (uint i = 0; i < users[_user].refers.length; i++) {
-      refers[i] = users[_user].refers[i];
-    }
-  }
-
-  function getReferSaleFees() public view virtual override
-      returns(uint[] memory _referSaleFees) {
-    for (uint i = 0; i < referSaleFees.length; i++) {
-      _referSaleFees[i] = referSaleFees[i];
-    }
+  function getUserRefers(address _user, uint256 _referNumber) public
+      view virtual override returns(address) {
+    return users[_user].refers[_referNumber];
   }
 }

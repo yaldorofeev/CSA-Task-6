@@ -49,7 +49,7 @@ export default {
       optimizer: {enabled: process.env.DEBUG ? false : true},
     },
   },
-  // defaultNetwork: "bsc_testnet",
+  defaultNetwork: "rinkeby",
   networks: {
     rinkeby: {
       url: process.env.RINKEBY_URL,

@@ -95,7 +95,7 @@ contract MyDAO is AccessControl, IMyDAO {
   // See IMyDAO-approveUnstake
   function approveUnstake(address _sender, uint256 _amount, uint256 _balance)
       public virtual override{
-    require(hasRole(UNSTAKER_ROLE, msg.sender), "Caller is not a unstaker");
+    require(hasRole(UNSTAKER_ROLE, msg.sender), "Caller is not an unstaker");
     for (uint i = 0; i < actualVotingsIds.length; i++) {
       uint256 id = actualVotingsIds[i];
       Voting storage vt = votings[id];
@@ -134,7 +134,7 @@ contract MyDAO is AccessControl, IMyDAO {
     (uint256 balance,,,)= staking.stakes(msg.sender);
     require(balance != 0, "No tokens to vote");
     (uint256 balanceTo,,,)= staking.stakes(_to);
-    require(balanceTo != 0, "This accaunt can not vote");
+    require(balanceTo != 0, "This account cannot vote");
     require(msg.sender != _to, "Voter cannot delegate himself");
     Voting storage vt = votings[_votingId];
     require(vt.actual, "This voting is not actual");
