@@ -45,6 +45,17 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
   uint public override saleDuration = 3 days;
   uint public override tradeDuration = 3 days;
 
+  /**
+   * @dev Record about round.
+   * @param startSaleTime timestamp when round started.
+   * @param startTradeTime timestamp when trade part of round started.
+   * @param roundStarted flag is round started.
+   * @param tradeInProgress flag is trade part of round started.
+   * @param price price of minted tokens.
+   * @param emission amount of minted tokens.
+   * @param sold amount of sold tokens in sale round.
+   * @param traded amount of sold tokens in trade round.
+   */
   struct Round {
     uint startSaleTime;
     uint startTradeTime;
@@ -58,6 +69,11 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
 
   mapping(uint256 => Round) public override rounds;
 
+  /**
+   * @dev Record about user.
+   * @param signed flag is user signed.
+   * @param refers from number in refers chain to refer address.
+   */
   struct User {
     bool signed;
     mapping(uint256 => address) refers;
@@ -65,6 +81,12 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
 
   mapping(address => User) public override users;
 
+  /**
+   * @dev Record about order.
+   * @param seller address of seller.
+   * @param price of one token.
+   * @param amount of selling tokens.
+   */
   struct Order {
     address seller;
     uint256 price;
@@ -89,6 +111,12 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
       _;
   }
 
+  /**
+   * @dev constructor
+   * @param _dao_address address of dao contract.
+   * @param _xxx_token_address address of XXXToken contract.
+   * @param _uniswap_address of uniswap contract.
+   */
   constructor(address _dao_address,
               address _xxx_token_address,
               address _uniswap_address) {
@@ -108,12 +136,14 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
     referSaleFees[1] = 30;
   }
 
+  // See IACDMPlatform-signOn
   function signOn() public virtual override {
     require(!users[msg.sender].signed, "You already signed");
     users[msg.sender].signed = true;
     emit SignOn(msg.sender, address(0));
   }
 
+  // See IACDMPlatform-signOn
   function signOn(address _refer) public virtual override {
     require(!users[msg.sender].signed, "You already signed");
     require(users[_refer].signed, "Invalid refer address");
@@ -126,6 +156,7 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
     emit SignOn(msg.sender, first_refer);
   }
 
+  // See IACDMPlatform-initSale
   function initSale() public virtual override {
     require(!sales_initiated, "Sales initiated already");
     sales_initiated = true;
@@ -139,6 +170,7 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
     emit SaleStarted(_roundIds.current());
   }
 
+  // See IACDMPlatform-startSale
   function startSale() public virtual override {
     uint256 roundId = _roundIds.current();
     Round storage rd = rounds[roundId];
@@ -153,6 +185,7 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
     emit SaleStarted(_roundIds.current());
   }
 
+  // See IACDMPlatform-buy
   function buy(uint256 _amount) public virtual override payable {
     Round storage rd = rounds[_roundIds.current()];
     require(rd.emission - rd.sold >= _amount, "Not enough tokens");
@@ -173,6 +206,7 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
     emit SoldOnSale(_roundIds.current(), msg.sender, _amount);
   }
 
+  // See IACDMPlatform-startTrade
   function startTrade() public virtual override {
     Round storage rd = rounds[_roundIds.current()];
     require((rd.sold == rd.emission) || (block.timestamp > rd.startSaleTime + saleDuration),
@@ -187,6 +221,7 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
     emit TradeStarted(_roundIds.current());
   }
 
+  // See IACDMPlatform-addOrder
   function addOrder(uint256 _amount, uint256 _price) public virtual
       override onlySigned {
     require(rounds[_roundIds.current()].tradeInProgress,
@@ -201,6 +236,7 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
     emit OrderAdded(orderId);
   }
 
+  // See IACDMPlatform-removeOrder
   function removeOrder(uint256 _orderId) public virtual override {
     Order storage or = orders[_orderId];
     require(or.seller == msg.sender, "Caller is not seller");
@@ -210,6 +246,7 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
     emit OrderClosed(_orderId);
   }
 
+  // See IACDMPlatform-redeemOrder
   function redeemOrder(uint256 _orderId, uint256 _amount) public virtual override
       payable {
     Round storage rd = rounds[_roundIds.current()];
@@ -240,6 +277,7 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
     }
   }
 
+  // See IACDMPlatform-stopTrade
   function stopTrade() public virtual override {
     Round storage rd = rounds[_roundIds.current()];
     require(rd.tradeInProgress, "Trading round is not started");
@@ -250,6 +288,7 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
     _roundIds.increment();
   }
 
+  // See IACDMPlatform-withdraw
   function withdraw(address _to, uint256 _amount) public virtual override {
     require(hasRole(WITHDRAW, msg.sender) || hasRole(DEFAULT_ADMIN_ROLE, msg.sender),
       "Caller cannot withdraw");
@@ -258,6 +297,7 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
     payable(_to).transfer(_amount);
   }
 
+  // See IACDMPlatform-buyAndBurnXXXTokens
   function buyAndBurnXXXTokens() public virtual override onlyDAO returns(bool) {
     address[] memory path = new address[](2);
     path[0] = uniswap.WETH();
@@ -275,12 +315,14 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
     return(true);
   }
 
+  // See IACDMPlatform-giveToOwner
   function giveToOwner() public virtual override onlyDAO returns(bool) {
     acdm_accaunt += acdm_spec_accaunt;
     acdm_spec_accaunt = 0;
     return(true);
   }
 
+  // See IACDMPlatform-changeRefersSaleFee
   function changeRefersSaleFee(uint256[] memory _newFees)
       public virtual override onlyDAO returns(bool) {
     require(_newFees.length <= refersCount, "Invalid refer");
@@ -290,24 +332,29 @@ contract ACDMPlatform is AccessControl, IACDMPlatform {
     return(true);
   }
 
+  // See IACDMPlatform-changeRefersTradeFee
   function changeRefersTradeFee(uint256 _newFee)
       public virtual override onlyDAO returns(bool) {
     referTradeFee = _newFee;
     return(true);
   }
 
+  // See IACDMPlatform-getCurrentRoundId
   function getCurrentRoundId() public view virtual override returns(uint256) {
     return _roundIds.current();
   }
 
+  // See IACDMPlatform-getOrdersNumber
   function getOrdersNumber() public view virtual override returns(uint256) {
     return _orderIds.current();
   }
 
+  // See IACDMPlatform-getWithdrawRole
   function getWithdrawRole() public view virtual override returns(bytes32) {
     return WITHDRAW;
   }
 
+  // See IACDMPlatform-getUserRefers
   function getUserRefers(address _user, uint256 _referNumber) public
       view virtual override returns(address) {
     return users[_user].refers[_referNumber];

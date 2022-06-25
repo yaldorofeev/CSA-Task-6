@@ -38,6 +38,17 @@ contract MyStaking is IMyStaking {
 
   mapping(address => Stake) public override stakes;
 
+  /**
+   * @dev constructor
+   * @param _uniswap_contract_address of uniswap contract.
+   * @param _erc20_reward_contract_address address of tokens for reward.
+   * @param _reward_period.
+   * @param _lock_period.
+   * @param _reward_procents.
+   * @param _daoChairPerson for DAO deployng.
+   * @param _daoMinimumQuorum for DAO deployng.
+   * @param _daoDebatingPeriodDuration for DAO deployng.
+   */
   constructor(address _uniswap_contract_address,
               address _erc20_reward_contract_address,
               uint _reward_period,
@@ -65,6 +76,7 @@ contract MyStaking is IMyStaking {
     rewardProcents = _reward_procents;
   }
 
+  // See IMyStaking-stake
   function stake(uint256 _amount) public virtual override {
     uint _now_ = block.timestamp;
     Stake storage st = stakes[msg.sender];
@@ -82,6 +94,7 @@ contract MyStaking is IMyStaking {
     emit StakeDone(msg.sender, _amount);
   }
 
+  // See IMyStaking-claim
   function claim() public virtual override {
     uint _now_ = block.timestamp;
     Stake storage st = stakes[msg.sender];
@@ -108,6 +121,7 @@ contract MyStaking is IMyStaking {
     }
   }
 
+  // See IMyStaking-unstake
   function unstake(uint256 _amount) public virtual override {
     uint _now_ = block.timestamp;
     Stake storage st = stakes[msg.sender];
